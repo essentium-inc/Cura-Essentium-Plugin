@@ -1,0 +1,8 @@
+{
+    "name": "Essentium Plugin",
+    "author": "Alexander Yozzo",
+    "version": "0.0.1",
+    "description": "A simple resource installer plugin. Use this to install resource and plugin files from a zip file.",
+    "supported_sdk_versions": ["8.0.0"],
+    "i18n-catalog": "cura"
+}

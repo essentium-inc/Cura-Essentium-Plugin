@@ -1,0 +1,43 @@
+QT Framework
+https://my.qt.io/
+
+Qt Wiki
+https://wiki.qt.io/Main
+
+1. Download for windows - open source development
+Free IDE - terms and conditions - we are using this
+
+Find the download link from here
+https://www.qt.io/download-open-source
+
+Or just download directly here	
+https://www.qt.io/download-qt-installer-oss?hsCtaTracking=99d9dd4f-5681-48d2-b096-470725510d34%7C074ddad0-fdef-4e53-8aa8-5e8a876d6ab4
+
+Create a Qt Account - prompted after running the installer
+	Service Terms - https://www.qt.io/terms-conditions/#qt_account
+
+Commercially licensed IDE - we are NOT using this (yet?)
+https://en.wikipedia.org/wiki/Qt_Creator
+
+
+
+
+Libray Info Links
+https://en.wikipedia.org/wiki/Qt_Quick
+https://wiki.qt.io/New_Features_in_Qt_5.15
+
+Dremel Plugin Versions
+
+Qt Version:     	Qt 5.15
+QtQml:				2.15
+QtQml.Models:		2.15
+QtQuick:			2.15
+QtQuick.Particles	2.15
+QtQuick.Controls	2.15
+QtQuick.Layouts		1.15
+QtQuick.Dialogs		1.3
+
+
+
+
+
