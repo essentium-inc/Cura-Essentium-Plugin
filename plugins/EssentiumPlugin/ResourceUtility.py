@@ -17,18 +17,26 @@
 import os  # for listdir
 import os.path  # for isfile and join and path
 import platform
-from . import EssentiumZipFile
+import shutil
+import datetime
+import traceback
+
+from PyQt6.QtCore import QThreadPool, Qt
+from PyQt6.QtWidgets import QFileDialog, QApplication
 from UM.Message import Message
 from UM.Logger import Logger
-from PyQt6.QtWidgets import QFileDialog
+
+from .EssentiumZipFile import EssentiumZipFile
+from .CustomDialog import CustomDialog
+from .Worker import Worker
 
 
 # Detect the platform, and return a simple string.
 def detect_platform():
     my_sys = platform.system()
-    Logger.log("i", "Essentium Plugin   -  Detected  - OS Name: " + os.name)
-    Logger.log("i", "Essentium Plugin   -  Detected  - Platform System: " + my_sys)
-    Logger.log("i", "Essentium Plugin   -  Detected  - Platform Version: " + platform.release())
+    Logger.log("i", "Detected  - OS Name:          " + os.name)
+    Logger.log("i", "Detected  - Platform System:  " + my_sys)
+    Logger.log("i", "Detected  - Platform Version: " + platform.release())
 
     # todo - for our purposes, we really only need special behavior on Mac, so just look for those cases
     # otherwise default to 'windows like' behavior
@@ -56,13 +64,14 @@ def get_downloads_dir_path():
     # this is meant to use the high level parent directories, and be called once
 
 
-class InstallUtil:
+class ResourceUtility:
     def __init__(self, cura, cura_catalog):
         self.cura_root = cura
         self.cura_plugin_root = os.path.join(cura, "plugins")
-        self.cura_unzip_directory_path = cura   # os.path.join(cura, "unzip") # todo testing
+        self.cura_unzip_directory_path = cura
         self.catalog = cura_catalog
         self.platform = detect_platform()
+        self.output_zip_path = ""
 
     # Updates the permissions of a file or directory, and all subdirectories & files.
     @staticmethod
@@ -90,6 +99,8 @@ class InstallUtil:
             Logger.log("i", "User selected file to install:  " + file_path)
             self.install_zip(file_path)
 
+    # todo - depending on data in zip, bad things can happen with data being overwritten, including stl files
+    # need to mitigate that somehow
     def install_zip(self, zip_file_path):
         if zip_file_path is None:
             zip_file_path = ""
@@ -103,7 +114,65 @@ class InstallUtil:
             return
 
         Logger.log('i', "Installing resources from zip: " + zip_file_path + "   to: " + self.cura_unzip_directory_path)
-        zip_file = EssentiumZipFile.EssentiumZipFile(zip_file_path, self.cura_unzip_directory_path, self.catalog)
+        zip_file = EssentiumZipFile(zip_file_path, self.cura_unzip_directory_path, self.catalog)
 
         if zip_file.validation_check(self.platform):
             zip_file.try_unzip_and_install(self.platform)
+
+    # worthy of a background worker, and a spinning cursor
+    def export_zip_worker(self, zip_file_path):
+        # do not try to do UI in this function, only background tasks
+        # the logger will work as expected
+
+        if zip_file_path is None:
+            time_now = datetime.datetime.now().strftime("%m-%d-%y_%H-%M-%S")
+            file_name = 'Cura_Resources_' + time_now
+            zip_file_path = os.path.join(get_downloads_dir_path(), file_name)
+
+        if os.path.exists(zip_file_path):
+            Logger.log('i', 'File already exists, removing file:  ' + zip_file_path)
+            os.remove(zip_file_path)
+
+        # Set the zip path, and start on another thread
+        self.output_zip_path = zip_file_path
+        Logger.log("i", "Starting zip export... Zip File Path: " + self.output_zip_path)
+
+        self.output_zip_path = shutil.make_archive(self.output_zip_path, 'zip', self.cura_root)
+
+        if os.path.exists(self.output_zip_path):
+            Logger.log('i', 'Created zip file: ' + self.output_zip_path)
+        else:
+            Logger.log('w', 'Failed to create zip file...')
+
+    # Create a zip file with all resources, display a success or error dialog to confirm result
+    def export_resources(self, zip_file_path=None):
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+            # https://www.pythonguis.com/tutorials/multithreading-pyqt6-applications-qthreadpool/
+            pool = QThreadPool()
+            worker = Worker(self.export_zip_worker, zip_file_path)
+            pool.start(worker)
+            pool.waitForDone()
+
+            # Dialog's must be on UI thread, not background worker
+            if os.path.exists(self.output_zip_path):
+                success_message = "Resources exported to:  " + self.output_zip_path
+                success_dialog = CustomDialog("Success", success_message, False)
+                QApplication.restoreOverrideCursor()
+                success_dialog.show()
+                Logger.log('i', success_message)
+            else:
+                fail_message = "Failed To Export Resources - file does not exist:  " + self.output_zip_path
+                fail_dialog = CustomDialog("Failure", fail_message, False)
+                QApplication.restoreOverrideCursor()
+                fail_dialog.show()
+                Logger.log('e', fail_message)
+
+        except Exception as e:
+            Logger.log('e', 'Exception while trying to create zip file...')
+            fail_message = repr(e) + ' ' + traceback.format_exc() + "     Failed To Export Resources:  " + self.output_zip_path
+            fail_dialog = CustomDialog("Failure - Exception Thrown", fail_message, False)
+            QApplication.restoreOverrideCursor()
+            fail_dialog.show()
+            Logger.log('e', fail_message)

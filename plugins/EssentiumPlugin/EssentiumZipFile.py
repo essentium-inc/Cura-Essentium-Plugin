@@ -1,15 +1,14 @@
-import os  # for listdir
-import os.path  # for isfile and join and path
-import stat     # For setting file permissions correctly
+import os
+import os.path
+import stat     # file permissions
 import traceback
-import zipfile  # For unzipping the printer files
+import zipfile
 
 from UM.Message import Message
 from UM.Logger import Logger
 
-from PyQt6.QtWidgets import (QWidget, QSlider, QLineEdit, QLabel, QDialog, QPushButton, QScrollArea, QApplication,
-                             QHBoxLayout, QVBoxLayout, QMainWindow, QDialogButtonBox)
-from PyQt6.QtCore import Qt, QSize
+from .CustomDialog import CustomDialog
+
 
 class EssentiumZipFile:
     def __init__(self, zip_file_path, unzip_dir_path, catalog):
@@ -86,7 +85,7 @@ class EssentiumZipFile:
                 success_message += p + "\n"
 
             success_dialog = CustomDialog("Successfully Imported Resources", success_message, False)
-            success_dialog.exec()
+            success_dialog.show()
             Logger.log('i', success_message)
             return True
 
@@ -152,16 +151,17 @@ class EssentiumZipFile:
                         Logger.log("w", "Found unexpected resource in zip file: " + info.filename)
 
             # prompt user if existing files found
-            if len(self.existing_file_paths) > 0:
+            n_file_duplicates = len(self.existing_file_paths)
+            if n_file_duplicates > 0:
                 Logger.log("w", "Duplicate resources detected")
 
-                duplicate_message = "Overwrite " + str(len(self.existing_file_paths)) + " existing resource files?\n\n"
+                duplicate_message = "Overwrite " + str(n_file_duplicates) + " existing resource files?\n\n"
 
                 for p in self.existing_file_paths:
                     duplicate_message += p + "\n"
 
                 dialog_duplicates = CustomDialog("Overwrite existing resources?", duplicate_message)
-                if dialog_duplicates.exec():
+                if dialog_duplicates.show():
                     Logger.log("i", "Passed validation, accepting duplicates. TODO something..")
                     return True
                 else:
@@ -179,32 +179,3 @@ class EssentiumZipFile:
                                                  'resources from: ' + self.zip_path + "     " + repr(e)))
             message.show()
             return False
-
-
-# https://www.pythonguis.com/tutorials/pyqt-dialogs/
-class CustomDialog(QDialog):
-    def __init__(self, title, message, include_cancel_button=True):
-        super().__init__()
-
-        self.setWindowTitle(title)
-        if include_cancel_button:
-            self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        else:
-            self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        self.buttonBox.accepted.connect(self.accept)
-        self.buttonBox.rejected.connect(self.reject)
-
-        # define scroll area, put message inside of that
-        scroll = QScrollArea()
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidgetResizable(True)
-
-        # message is a 'QLabel' widget, which is inside a scroll area widget
-        scroll.setWidget(QLabel(message))
-
-        # dialog has scrolling message area, then the buttons
-        layout = QVBoxLayout()
-        layout.addWidget(scroll)
-        layout.addWidget(self.buttonBox)
-        self.setLayout(layout)
