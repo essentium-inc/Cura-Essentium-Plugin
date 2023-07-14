@@ -3,15 +3,18 @@ from PyQt6.QtWidgets import (QLabel, QDialog, QScrollArea, QVBoxLayout, QDialogB
 
 
 # https://www.pythonguis.com/tutorials/pyqt-dialogs/
+# simple wrapper to make dialogs easy to code
 class CustomDialog(QDialog):
     def __init__(self, title, message, include_cancel_button=True):
         super().__init__()
 
         self.setWindowTitle(title)
         if include_cancel_button:
-            self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                              QDialogButtonBox.StandardButton.Cancel)
         else:
             self.buttonBox = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
 

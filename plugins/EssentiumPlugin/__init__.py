@@ -8,7 +8,7 @@ catalog = i18nCatalog("cura")
 
 
 def getMetaData():
-    return {}  # todo?
+    return {}
 
 
 def register(app):

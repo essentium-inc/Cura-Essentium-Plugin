@@ -1,9 +1,13 @@
 import os
 import os.path
-import stat     # file permissions
+import shutil
+import tempfile
 import traceback
 import zipfile
+from pathlib import Path
 
+from PyQt6.QtCore import  Qt
+from PyQt6.QtWidgets import QApplication
 from UM.Message import Message
 from UM.Logger import Logger
 
@@ -11,170 +15,210 @@ from .CustomDialog import CustomDialog
 
 
 class EssentiumZipFile:
-    def __init__(self, zip_file_path, unzip_dir_path, catalog):
+    def __init__(self, zip_file_path, catalog, platform):
         self.zip_path = zip_file_path
-        self.unzip_dir_path = unzip_dir_path
         self.catalog = catalog
+        self.platform = platform
 
-        if self.zip_path is None:
-            self.zip_path = ""
+    def try_install(self, install_root_path, validate, install):
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
-        if self.unzip_dir_path is None:
-            self.unzip_dir_path = ""
-
-        self.duplicate_file_infos = []
-        self.existing_file_paths = []
-
-    def try_unzip_and_install(self, platform):
         try:
-            Logger.log('i', "Installing: " + self.zip_path + "     to: " + self.unzip_dir_path)
-
-            installed_paths = []
-
-            # unzip and install
-            with zipfile.ZipFile(self.zip_path, "r") as zip_ref:
-                for info in zip_ref.infolist():
-                    x = info.filename.lower()
-
-                    if x == "version notes.txt":
-                        # corner case, only file at top level, want to keep this in special place
-                        Logger.log("w", "TODO handle the version notes file")
-                        # todo pick somewhere for this, then read this data for an About page, to show details of
-                        # the last installed resources
-                        continue
-
-                    # skip Mac files when using Windows or Linux
-                    if platform == "Mac" and not x.startswith("__mac"):
-                        continue
-
-                    # skip Windows files when using Mac
-                    if platform != "Mac" and x.startswith("__mac"):
-                        continue
-
-                    # skip Work In Progress files, skips nested in a .wip directory as well as files ending in .wip
-                    if ".wip" in x:
-                        continue
-
-                    # directory path, not a file
-                    if x.endswith("\\") or x.endswith("/"):
-                        continue
-
-                    # skip
-                    if x.endswith("ds_store"):
-                        continue
-
-                    # For some reason, looks like all resource files fall into one of the following 5 file types
-                    if x.endswith(".fdm_material") or x.endswith(".cfg") or x.endswith(".def.json") or \
-                       x.endswith(".stl") or x.endswith(".py"):
-                        # used 'x' variable until now, to force lowercase string comparison, now use real thing
-
-                        new_file_path = os.path.join(self.unzip_dir_path, info.filename)
-                        Logger.log("i", "Extracting resource: " + new_file_path)
-                        zip_ref.extract(info.filename, path=self.unzip_dir_path)
-
-                        installed_paths.append(new_file_path)
-
-                        permissions = os.stat(new_file_path).st_mode
-                        os.chmod(new_file_path, permissions | stat.S_IEXEC)  # Make these files executable.
-                    else:
-                        Logger.log("w", "Found unexpected resource in zip file: " + info.filename)
-
-            success_message = str(len(installed_paths)) + " resources installed\n\n"
-
-            for p in installed_paths:
-                success_message += p + "\n"
-
-            success_dialog = CustomDialog("Successfully Imported Resources", success_message, False)
-            success_dialog.show()
-            Logger.log('i', success_message)
-            return True
-
+            self.install(install_root_path, validate, install)
         except Exception as e:
-            Logger.log("e", repr(e))
+            Logger.log('e', repr(e))
             Logger.log("e", traceback.format_exc())
+            # otherwise silent failure for now
 
-            message = Message(self.catalog.i18nc("@warning:status", 'Essentium Plugin - Error, failed to import ' +
-                                                 'resources from: ' + self.zip_path + "     " + repr(e)))
-            message.show()
-            return False
+        QApplication.restoreOverrideCursor()
 
-    # Check that we are ready for install, prompt the user if necessary. Return False to fail validation.
-    def validation_check(self, platform):
-        try:
-            if not os.path.exists(self.zip_path):
-                Logger.log("i", "Failed validation.. Zip file does not exist: " + self.zip_path)
+    # Dual use validation and install function, can be used recursively to validate then install
+    # reason for this design is to ensure only 1 loop over the zip file exists in code, used for
+    # both validation and installation, and validation can be called without installing
+    def install(self, install_root_path, validate=True, install=True):
+
+        # recursion corner case
+        if not validate and not install:
+            Exception("Bad input, validate and/or install must be True")
+
+        # recursion logic
+        if validate and install:
+            if self.install(install_root_path, True, False):  # if passes validation
+                return self.install(install_root_path, False, True)  # install it
+            else:
+                # Failed validation, do not install, validation failure dialogs already handled
+                # return False to represent the failed installation
                 return False
 
-            self.duplicate_file_infos = []
-            self.existing_file_paths = []
+        # From here, we are executing either validation or installation, exactly one of those two.
+        try:
+            if validate:
+                if not os.path.exists(self.zip_path):
+                    if self.zip_path is None:
+                        self.zip_path = ""
+                    no_file_dialog = CustomDialog("Import Validation Error", "Zip file does not exist: " +
+                                                  self.zip_path, include_cancel_button=False)
+                    QApplication.restoreOverrideCursor()
+                    no_file_dialog.show()
 
-            # check for existing files
-            with zipfile.ZipFile(self.zip_path, "r") as zip_ref:
-                for info in zip_ref.infolist():
-                    x = info.filename.lower()
-
-                    if x == "version notes.txt":
-                        continue
-
-                    # skip Mac files when using Windows or Linux
-                    if platform == "Mac" and not x.startswith("__mac"):
-                        continue
-
-                    # skip Windows files when using Mac
-                    if platform != "Mac" and x.startswith("__mac"):
-                        continue
-
-                    # skip Work In Progress files, skips nested in a .wip directory as well as files ending in .wip
-                    if ".wip" in x:
-                        continue
-
-                    # directory path, not a file
-                    if x.endswith("\\") or x.endswith("/"):
-                        continue
-
-                    # skip
-                    if x.endswith("ds_store"):
-                        continue
-
-                    # For some reason, looks like all resource files fall into one of the following 5 file types
-                    if x.endswith(".fdm_material") or x.endswith(".cfg") or x.endswith(".def.json") or \
-                       x.endswith(".stl") or x.endswith(".py"):
-                        # used 'x' variable until now, to force lowercase string comparison, now use real thing
-
-                        new_file_path = os.path.join(self.unzip_dir_path, info.filename)
-
-                        if os.path.exists(new_file_path):
-                            Logger.log("i", "Found duplicate resource: " + new_file_path)
-                            self.duplicate_file_infos.append(info.filename)
-                            self.existing_file_paths.append(new_file_path)
-                    else:
-                        Logger.log("w", "Found unexpected resource in zip file: " + info.filename)
-
-            # prompt user if existing files found
-            n_file_duplicates = len(self.existing_file_paths)
-            if n_file_duplicates > 0:
-                Logger.log("w", "Duplicate resources detected")
-
-                duplicate_message = "Overwrite " + str(n_file_duplicates) + " existing resource files?\n\n"
-
-                for p in self.existing_file_paths:
-                    duplicate_message += p + "\n"
-
-                dialog_duplicates = CustomDialog("Overwrite existing resources?", duplicate_message)
-                if dialog_duplicates.show():
-                    Logger.log("i", "Passed validation, accepting duplicates. TODO something..")
-                    return True
-                else:
-                    Logger.log("i", "Rejecting duplicates. TODO")
+                    Logger.log("i", "Failed validation.. Zip file does not exist: " + self.zip_path)
                     return False
 
-            Logger.log('i', "Passed validation, no duplicate resources detected: " + self.zip_path)
-            return True
+            existing_file_paths = []
+            new_file_paths = []
+            installed_file_paths = []
+
+            # partially shared piece - computing installation paths for validation & installation
+            # each item is either a new resource, an existing resource, or a throw away that we ignore
+            with zipfile.ZipFile(self.zip_path, "r") as zip_ref:
+                with tempfile.TemporaryDirectory() as tempdir:
+                    if install:
+                        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                        Logger.log('i', "Extracting zip to temp directory:  " + tempdir)
+                        zip_ref.extractall(tempdir)
+                        Logger.log('i', "Installing zip from temp directory to:   " + install_root_path)
+
+                    for info in zip_ref.infolist():
+                        x = info.filename.lower()  # easier string comparisons
+
+                        if x == "version notes.txt":
+                            continue
+
+                        # skip Mac files when using Windows or Linux
+                        if self.platform == "Mac" and not x.startswith("__macosx"):
+                            continue
+
+                        # skip Windows files when using Mac
+                        if self.platform != "Mac" and x.startswith("__macosx"):
+                            continue
+
+                        # skip Work In Progress files, skips nested in a .wip directory as well as files ending in .wip
+                        if ".wip" in x:
+                            continue
+
+                        # directory path, not a file
+                        if x.endswith("\\") or x.endswith("/"):
+                            continue
+
+                        # skip
+                        if x.endswith("ds_store"):
+                            continue
+
+                        # 5 approved resource file types
+                        if x.endswith(".fdm_material") or x.endswith(".cfg") or x.endswith(".def.json") or \
+                           x.endswith(".stl") or x.endswith(".py"):
+                            # used 'x' variable until now, to force lowercase string comparison, now use real path
+                            # hard coding Essentium release style - with resources parent folder
+
+                            # format install path for resources - doesn't affect plugins
+                            temp_file_name = info.filename.removeprefix("__MACOSX/")
+                            temp_file_name = temp_file_name.removeprefix("resources/")
+
+                            # for install path for plugins - doesn't affect resources
+                            if temp_file_name.startswith("plugins"):
+                                pieces = temp_file_name.split('/')
+                                plugin_name = pieces[1]
+                                # duplicate directory name on purpose
+                                temp_file_name = temp_file_name.replace(plugin_name + "/",
+                                                                        plugin_name + "/" + plugin_name + "/", 1)
+
+                            new_file_path = os.path.join(install_root_path, temp_file_name)
+                            new_file_path = new_file_path.replace('/', '\\')
+
+                            # note - this new_file_path seems correct, but I could not get any unzip function
+                            # to change the path while unzipping (so I can't use this directly now to install)
+
+                            if validate:
+                                # Need to warn user before overwriting existing files
+                                if os.path.exists(new_file_path):
+                                    Logger.log("i", "File already exists, duplicate resource: " + new_file_path)
+                                    existing_file_paths.append(new_file_path)
+                                else:
+                                    Logger.log("i", "New resource, expected install location: " + new_file_path)
+                                    new_file_paths.append(new_file_path)
+
+                            if install:
+                                # now have access to install paths, and temp directory paths of unzipped files
+                                unzip_file_path = os.path.join(tempdir, info.filename)
+                                Logger.log('i', 'Installing resource from: ' +
+                                           unzip_file_path + "   to: " + new_file_path)
+
+                                # todo directory creation can fail on windows if not ran as admin
+                                # shows somewhat helpful error message, but could be better
+
+                                # create directories if needed, 'meshes' is typically the case for this
+                                path_obj = Path(os.path.basename(new_file_path))
+                                path_obj.mkdir(parents=True, exist_ok=True)
+
+                                # create file by copying from temp directory
+                                shutil.copy(unzip_file_path, new_file_path)
+                                installed_file_paths.append(new_file_path)
+                        else:
+                            Logger.log("w", "Found unexpected resource in zip file, not installing: " + info.filename)
+                            # Ignoring unapproved file types
+
+            # Validation prompts
+            if validate:
+                QApplication.restoreOverrideCursor()
+
+                # prompt user if existing files found
+                n_existing = len(existing_file_paths)
+                n_new = len(new_file_paths)
+                if n_existing > 0 or n_new > 0:
+                    message = str(n_new) + " New Resources\n" + str(n_existing) + " Duplicate Resources\n\n"
+
+                    if n_existing > 0:
+                        message += "Duplicate Resources - Overwrite " + str(n_existing) + " files?\n\n"
+
+                        for p in existing_file_paths:
+                            message += p + "\n"
+
+                        message += "\n\n"
+
+                    if n_new > 0:
+                        message += "New Resources - Import " + str(n_new) + " files?\n\n"
+
+                        for p in new_file_paths:
+                            message += p + "\n"
+
+                    Logger.log('i', message)
+                    import_dialog = CustomDialog("Import Resources?", message)
+
+                    if import_dialog.show():
+                        Logger.log("i", "User accepted installation.")
+                        Logger.log('i', "Passed validation: " + self.zip_path)
+                        return True
+                    else:
+                        Logger.log("i", "User rejected installation.")
+                        Logger.log('i', "Passed validation, but user canceled install: " + self.zip_path)
+                        return False
+                else:
+                    Logger.log('w','Import Validation Error - zip file does not contain any approved resources')
+                    empty_dialog = CustomDialog("Import Validation Error", "Zip file does not contain any approved "
+                                                "resources. You cannot install from this zip.",
+                                                include_cancel_button=False)
+                    QApplication.restoreOverrideCursor()
+                    empty_dialog.show()
+                    return False
+
+            # installation prompts
+            if install:
+                QApplication.restoreOverrideCursor()
+                success_message = str(len(installed_file_paths)) + " resources installed\n\n"
+
+                for p in installed_file_paths:
+                    success_message += p + "\n"
+
+                success_dialog = CustomDialog("Successfully Imported Resources", success_message, False)
+                success_dialog.show()
+                Logger.log('i', success_message)
+                return True
 
         except Exception as e:
             Logger.log("e", repr(e))
             Logger.log("e", traceback.format_exc())
 
+            QApplication.restoreOverrideCursor()
             message = Message(self.catalog.i18nc("@warning:status", 'Essentium Plugin - Error, failed to import ' +
                                                  'resources from: ' + self.zip_path + "     " + repr(e)))
             message.show()

@@ -17,8 +17,8 @@
 # https://github.com/essentium-inc/Cura-Essentium-Plugin/blob/master/LICENSE
 ####################################################################
 
-import os  # for listdir
-import os.path  # for isfile and join and path
+import os
+import os.path
 
 from PyQt6.QtCore import QObject, QUrl, pyqtSlot
 from PyQt6.QtGui import QDesktopServices
@@ -61,8 +61,9 @@ class EssentiumPlugin(QObject, MeshWriter, Extension):
             os.path.join(self.cura_resource_root_path, "plugins", "EssentiumPlugin", "EssentiumPlugin")
 
         self._preferences_window = None
-        self.addMenuItem(catalog.i18nc("@item:inmenu", "Import Zip"), self.click_import_resources)
-        self.addMenuItem(catalog.i18nc("@item:inmenu", "Export Zip"), self.click_export_resources)
+        self.addMenuItem(catalog.i18nc("@item:inmenu", "Import Resources"), self.click_import_resources)
+        self.addMenuItem(catalog.i18nc("@item:inmenu", "Export Resources"), self.click_export_resources)
+        self.addMenuItem(catalog.i18nc("@item:inmenu", "Snapshot"), self.click_export_snapshot)
         self.addMenuItem(catalog.i18nc("@item:inmenu", "Help"), self.click_help)
 
         # save the cura.cfg file
@@ -70,16 +71,6 @@ class EssentiumPlugin(QObject, MeshWriter, Extension):
                                                            self._application.getApplicationName() + ".cfg"))
         Logger.log("i", "Writing to " + storage_path_x)
         self._application.getPreferences().writeToFile(storage_path_x)
-
-    def create_preferences_window(self):
-        path_x = os.path.join(PluginRegistry.getInstance().getPluginPath(self.getPluginId()),
-                              "EssentiumPluginprefs.qml")
-        Logger.log("i", "Creating preferences UI " + path_x)
-        self._preferences_window = self._application.createQmlComponent(path_x, {"manager": self})
-
-    def hide_preferences(self):
-        if self._preferences_window is not None:
-            self._preferences_window.hide()
 
     @pyqtSlot()
     def open_plugin_website(self):
@@ -112,13 +103,18 @@ class EssentiumPlugin(QObject, MeshWriter, Extension):
 
     @pyqtSlot()
     def click_import_resources(self):
-        importer = ResourceUtility(self.cura_resource_root_path, catalog)
-        importer.install_from_user_selection()
+        resource_utility = ResourceUtility(self.cura_resource_root_path, catalog)
+        resource_utility.import_from_user_selection()
 
     @pyqtSlot()
     def click_export_resources(self):
-        exporter = ResourceUtility(self.cura_resource_root_path, catalog)
-        exporter.export_resources()
+        resource_utility = ResourceUtility(self.cura_resource_root_path, catalog)
+        resource_utility.export_resources_from_user_selection()
+
+    @pyqtSlot()
+    def click_export_snapshot(self):
+        resource_utility = ResourceUtility(self.cura_resource_root_path, catalog)
+        resource_utility.export_snapshot_from_user_selection()
 
     #  Gets a value from Cura's preferences
     def get_preference_value(self, preference_name):

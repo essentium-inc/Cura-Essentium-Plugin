@@ -14,12 +14,13 @@
 # https://github.com/essentium-inc/Cura-Essentium-Plugin/blob/master/LICENSE
 ####################################################################
 
-import os  # for listdir
-import os.path  # for isfile and join and path
+import os
+import os.path
 import platform
 import shutil
 import datetime
 import traceback
+from pathlib import Path
 
 from PyQt6.QtCore import QThreadPool, Qt
 from PyQt6.QtWidgets import QFileDialog, QApplication
@@ -29,6 +30,7 @@ from UM.Logger import Logger
 from .EssentiumZipFile import EssentiumZipFile
 from .CustomDialog import CustomDialog
 from .Worker import Worker
+from .Zipper import Zipper
 
 
 # Detect the platform, and return a simple string.
@@ -38,7 +40,6 @@ def detect_platform():
     Logger.log("i", "Detected  - Platform System:  " + my_sys)
     Logger.log("i", "Detected  - Platform Version: " + platform.release())
 
-    # todo - for our purposes, we really only need special behavior on Mac, so just look for those cases
     # otherwise default to 'windows like' behavior
     if my_sys == "Darwin":
         # OS X
@@ -67,29 +68,15 @@ def get_downloads_dir_path():
 class ResourceUtility:
     def __init__(self, cura, cura_catalog):
         self.cura_root = cura
-        self.cura_plugin_root = os.path.join(cura, "plugins")
-        self.cura_unzip_directory_path = cura
         self.catalog = cura_catalog
         self.platform = detect_platform()
-        self.output_zip_path = ""
 
-    # Updates the permissions of a file or directory, and all subdirectories & files.
-    @staticmethod
-    def update_permissions_recursive(path, status):
-        Logger.log('i', "Updating file permissions for: " + path)
-        for root, dirs, files in os.walk(path, topdown=False):
-            for dir_path in [os.path.join(root, d) for d in dirs]:
-                permissions = os.stat(dir_path).st_mode
-                os.chmod(dir_path, permissions | status)
-
-            for file in [os.path.join(root, f) for f in files]:
-                permissions = os.stat(file).st_mode
-                os.chmod(file, permissions | status)  # Make file executable
-
-    def install_from_user_selection(self):
+    def import_from_user_selection(self):
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         default_dir = get_downloads_dir_path()
 
         # returns a tuple, first item is path, second item is file type combobox selection
+        QApplication.restoreOverrideCursor()
         file_path = QFileDialog.getOpenFileName(None, "Import Resources - Select Essentium Zip File", default_dir,
                                                 "Zip-File (*.zip)")[0]
 
@@ -97,82 +84,162 @@ class ResourceUtility:
             Logger.log("i", "User cancelled dialog.")
         else:
             Logger.log("i", "User selected file to install:  " + file_path)
-            self.install_zip(file_path)
+            self.import_resources(file_path)
 
-    # todo - depending on data in zip, bad things can happen with data being overwritten, including stl files
-    # need to mitigate that somehow
-    def install_zip(self, zip_file_path):
+    def import_resources(self, zip_file_path):
         if zip_file_path is None:
             zip_file_path = ""
 
         # check zip file exists
         if not os.path.exists(zip_file_path):
-            error_message = 'Error while installing, failed to find source directory: ' + zip_file_path
+            error_message = 'Error while importing resources, failed to find source directory: ' + zip_file_path
             Logger.log('e', error_message)
             message = Message(self.catalog.i18nc("@warning:status", error_message))
             message.show()
             return
 
-        Logger.log('i', "Installing resources from zip: " + zip_file_path + "   to: " + self.cura_unzip_directory_path)
-        zip_file = EssentiumZipFile(zip_file_path, self.cura_unzip_directory_path, self.catalog)
+        zip_file = EssentiumZipFile(zip_file_path, self.catalog, self.platform)
+        zip_file.try_install(self.cura_root, True, True)
 
-        if zip_file.validation_check(self.platform):
-            zip_file.try_unzip_and_install(self.platform)
+    def export_resources_from_user_selection(self):
+        time_now = datetime.datetime.now().strftime("%m-%d-%y_%H-%M-%S")
+        file_name = 'Cura_Resources_' + time_now + ".zip"
+        default_zip_file_path = os.path.join(get_downloads_dir_path(), file_name)
 
-    # worthy of a background worker, and a spinning cursor
-    def export_zip_worker(self, zip_file_path):
-        # do not try to do UI in this function, only background tasks
-        # the logger will work as expected
+        # returns a tuple, first item is path, second item is file type combobox selection
+        user_selected_file_path = QFileDialog.getSaveFileName(None, "Export Resources", default_zip_file_path,
+                                                              "Zip-File (*.zip)")[0]
 
-        if zip_file_path is None:
-            time_now = datetime.datetime.now().strftime("%m-%d-%y_%H-%M-%S")
-            file_name = 'Cura_Resources_' + time_now
-            zip_file_path = os.path.join(get_downloads_dir_path(), file_name)
+        # cancel button
+        if user_selected_file_path is None or user_selected_file_path == "":
+            return
 
-        if os.path.exists(zip_file_path):
-            Logger.log('i', 'File already exists, removing file:  ' + zip_file_path)
-            os.remove(zip_file_path)
+        # this should never happen, due to using current time stamp
+        if os.path.exists(user_selected_file_path):
+            Logger.log('i', 'File already exists, removing file:  ' + user_selected_file_path)
+            os.remove(user_selected_file_path)
 
-        # Set the zip path, and start on another thread
-        self.output_zip_path = zip_file_path
-        Logger.log("i", "Starting zip export... Zip File Path: " + self.output_zip_path)
+        self.export_resources(user_selected_file_path)
 
-        self.output_zip_path = shutil.make_archive(self.output_zip_path, 'zip', self.cura_root)
-
-        if os.path.exists(self.output_zip_path):
-            Logger.log('i', 'Created zip file: ' + self.output_zip_path)
-        else:
-            Logger.log('w', 'Failed to create zip file...')
-
-    # Create a zip file with all resources, display a success or error dialog to confirm result
+    # creates a worker thread to export zip file, and spins the cursor
     def export_resources(self, zip_file_path=None):
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
 
             # https://www.pythonguis.com/tutorials/multithreading-pyqt6-applications-qthreadpool/
             pool = QThreadPool()
-            worker = Worker(self.export_zip_worker, zip_file_path)
+            worker = Worker(self.export_resources_worker, zip_file_path)
             pool.start(worker)
             pool.waitForDone()
 
             # Dialog's must be on UI thread, not background worker
-            if os.path.exists(self.output_zip_path):
-                success_message = "Resources exported to:  " + self.output_zip_path
+            if os.path.exists(zip_file_path):
+                success_message = "Resources exported to:  " + zip_file_path
                 success_dialog = CustomDialog("Success", success_message, False)
                 QApplication.restoreOverrideCursor()
                 success_dialog.show()
                 Logger.log('i', success_message)
             else:
-                fail_message = "Failed To Export Resources - file does not exist:  " + self.output_zip_path
+                fail_message = "Failed To Export Resources - file does not exist:  " + zip_file_path
                 fail_dialog = CustomDialog("Failure", fail_message, False)
                 QApplication.restoreOverrideCursor()
                 fail_dialog.show()
                 Logger.log('e', fail_message)
 
         except Exception as e:
-            Logger.log('e', 'Exception while trying to create zip file...')
-            fail_message = repr(e) + ' ' + traceback.format_exc() + "     Failed To Export Resources:  " + self.output_zip_path
+            Logger.log('e', 'Exception while trying to export resources...')
+            fail_message = repr(e) + ' ' + traceback.format_exc() + "     Failed To Export Resources:  " + zip_file_path
             fail_dialog = CustomDialog("Failure - Exception Thrown", fail_message, False)
             QApplication.restoreOverrideCursor()
             fail_dialog.show()
             Logger.log('e', fail_message)
+
+    # exports resources, ignoring log files, cura.cfg, user folder
+    def export_resources_worker(self, zip_file_path):
+        # do not try to do UI in this function, only background tasks
+        # the logger will work as expected
+
+        Logger.log("i", "Starting zip export... Zip File Path: " + zip_file_path)
+
+        # use zip utility to zip what we want, ignoring what we don't
+        zipper = Zipper(self.cura_root, zip_file_path)
+        zipper.zip_it(ignore_dir=[".svn", ".git", ".idea", "images", "machine_instances", "themes", "user"],
+                      ignore_ext=[".zip", ".log"],
+                      ignore_file_names=["packages.json", "plugins.json"],
+                      ignore_file_name_contains=["cura.log"],
+                      close_zip_file=True)
+
+        if os.path.exists(zip_file_path):
+            Logger.log('i', 'Created zip file: ' + zip_file_path)
+        else:
+            Logger.log('w', 'Failed to create zip file...')
+
+    def export_snapshot_from_user_selection(self):
+        time_now = datetime.datetime.now().strftime("%m-%d-%y_%H-%M-%S")
+        file_name = 'Cura_Snapshot_' + time_now
+        default_zip_file_path = os.path.join(get_downloads_dir_path(), file_name)
+
+        # returns a tuple, first item is path, second item is file type combobox selection
+        user_selected_file_path = QFileDialog.getSaveFileName(None, "Create Snapshot", default_zip_file_path,
+                                                              "Zip-File (*.zip)")[0]
+
+        # cancel button
+        if user_selected_file_path is None or user_selected_file_path == "":
+            return
+
+        # this should never happen, due to using current time stamp
+        if os.path.exists(user_selected_file_path):
+            Logger.log('i', 'File already exists, removing file:  ' + user_selected_file_path)
+            os.remove(user_selected_file_path)
+
+        self.export_snapshot(user_selected_file_path)
+
+    # creates a worker thread to export zip file, and spins the cursor
+    def export_snapshot(self, zip_file_path=None):
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+            # https://www.pythonguis.com/tutorials/multithreading-pyqt6-applications-qthreadpool/
+            pool = QThreadPool()
+            zip_file_path_obj = Path(zip_file_path)
+            worker = Worker(self.export_snapshot_worker, str(zip_file_path_obj.with_suffix('')))  # removes extension
+            pool.start(worker)
+            pool.waitForDone()
+
+            # Dialog's must be on UI thread, not background worker
+            if os.path.exists(zip_file_path):
+                success_message = "Snapshot created:  " + zip_file_path
+                success_dialog = CustomDialog("Success", success_message, False)
+                QApplication.restoreOverrideCursor()
+                success_dialog.show()
+                Logger.log('i', success_message)
+            else:
+                fail_message = "Failed to create Snapshot - file does not exist:  " + zip_file_path
+                fail_dialog = CustomDialog("Failure", fail_message, False)
+                QApplication.restoreOverrideCursor()
+                fail_dialog.show()
+                Logger.log('e', fail_message)
+
+        except Exception as e:
+            Logger.log('e', 'Exception while trying to create Snapshot...')
+            fail_message = repr(
+                e) + ' ' + traceback.format_exc() + "     Failed To create Snapshot:  " + zip_file_path
+            fail_dialog = CustomDialog("Failure - Exception Thrown", fail_message, False)
+            QApplication.restoreOverrideCursor()
+            fail_dialog.show()
+            Logger.log('e', fail_message)
+
+    # exports snapshot, which is everything, log files included, user config included, etc
+    def export_snapshot_worker(self, zip_file_path_no_ext):
+        # do not try to do UI in this function, only background tasks
+        # the logger will work as expected
+
+        # Set the zip path, and start on another thread
+        Logger.log("i", "Starting snapshot export... Zip File Path: " + zip_file_path_no_ext)
+
+        x = shutil.make_archive(zip_file_path_no_ext, 'zip', self.cura_root)
+
+        if os.path.exists(x):
+            Logger.log('i', 'Created zip file: ' + x)
+        else:
+            Logger.log('w', 'Something went wrong, failed to create snapshot...')
