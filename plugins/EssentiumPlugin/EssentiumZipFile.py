@@ -1,6 +1,7 @@
 import os
 import os.path
 import shutil
+import sys
 import tempfile
 import traceback
 import zipfile
@@ -204,7 +205,7 @@ class EssentiumZipFile:
             # installation prompts
             if install:
                 QApplication.restoreOverrideCursor()
-                success_message = str(len(installed_file_paths)) + " resources installed\n\n"
+                success_message = str(len(installed_file_paths)) + " resources installed - restarting Cura.\n\n"
 
                 for p in installed_file_paths:
                     success_message += p + "\n"
@@ -212,7 +213,9 @@ class EssentiumZipFile:
                 success_dialog = CustomDialog("Successfully Imported Resources", success_message, False)
                 success_dialog.show()
                 Logger.log('i', success_message)
-                return True
+
+                restart_program()  # force Cura to reload the app data we just installed
+                return True  # does not execute, but makes PyCharm happy
 
         except Exception as e:
             Logger.log("e", repr(e))
@@ -223,3 +226,11 @@ class EssentiumZipFile:
                                                  'resources from: ' + self.zip_path + "     " + repr(e)))
             message.show()
             return False
+
+
+def restart_program():
+    """Restarts the current program.
+    Note: this function does not return. Any cleanup action (like
+    saving data) must be done before calling this function."""
+    python = sys.executable
+    os.execl(python, python, * sys.argv)
