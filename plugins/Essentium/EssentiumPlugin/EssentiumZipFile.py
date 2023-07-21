@@ -148,8 +148,8 @@ class EssentiumZipFile:
                                 # shows somewhat helpful error message, but could be better
 
                                 # create directories if needed, 'meshes' is typically the case for this
-                                path_obj = Path(os.path.basename(new_file_path))
-                                path_obj.mkdir(parents=True, exist_ok=True)
+                                new_file_parent_dir_path = os.path.dirname(os.path.abspath(new_file_path))
+                                os.makedirs(new_file_parent_dir_path, exist_ok=True)
 
                                 # create file by copying from temp directory
                                 shutil.copy(unzip_file_path, new_file_path)

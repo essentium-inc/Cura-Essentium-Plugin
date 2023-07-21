@@ -45,7 +45,7 @@ class EssentiumPlugin(QObject, MeshWriter, Extension):
     #    2) .\plugin.json
     #    3) ..\..\resources\package.json
     ######################################################################
-    version = "0.0.1"
+    version = "0.0.2"
 
     def __init__(self):
         Logger.log("i", "Initializing...")
@@ -58,7 +58,7 @@ class EssentiumPlugin(QObject, MeshWriter, Extension):
         self.cura_resource_root_path = Resources.getStoragePath(Resources.Resources)
 
         self.this_plugin_path = \
-            os.path.join(self.cura_resource_root_path, "plugins", "EssentiumPlugin", "EssentiumPlugin")
+            os.path.join(self.cura_resource_root_path, "plugins", "Essentium", "Essentium")
 
         self._preferences_window = None
         self.addMenuItem(catalog.i18nc("@item:inmenu", "Import Resources"), self.click_import_resources)
@@ -118,13 +118,13 @@ class EssentiumPlugin(QObject, MeshWriter, Extension):
 
     #  Gets a value from Cura's preferences
     def get_preference_value(self, preference_name):
-        return self._application.getPreferences().getValue("EssentiumPlugin/" + str(preference_name))
+        return self._application.getPreferences().getValue("Essentium/" + str(preference_name))
 
     # Sets a value to be stored in Cura's preferences file
     def set_preference_value(self, preference_name, preference_value):
         if preference_value is None:
             return False
-        name = "EssentiumPlugin/" + str(preference_name)
+        name = "Essentium/" + str(preference_name)
         Logger.log("i", "Setting preference:  " + name + " to " + str(preference_value))
 
         if self.get_preference_value(preference_name) is None:
